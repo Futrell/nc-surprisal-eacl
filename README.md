@@ -16,7 +16,6 @@ address={Valencia, Spain}}
 To get started: `pip3 install -r requirements.txt`.
 
 ## Figure 1
-The relevant code is in the directory `code`. To generate the numbers for Figure 1, do:
 ```python
 import experiments
 _, english = experiments.verb_forgetting_conditions(m=.5, r=.5, e=.2, s=.8)
