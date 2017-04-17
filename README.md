@@ -17,7 +17,7 @@ To get started: `pip3 install -r requirements.txt`.
 
 ## Figure 1
 The relevant code is in the directory `code`. To generate the numbers for Figure 1, do:
-```python3
+```python
 import experiments
 _, english = experiments.verb_forgetting_conditions(m=.5, r=.5, e=.2, s=.8)
 _, german = experiments.verb_forgetting_conditions(m=.5, r=.5, e=.2, s=0)
@@ -26,7 +26,7 @@ The resulting numbers, divided by log2, are plotted against reading time data in
 
 ## Figure 2
 To generate Figure 2, do:
-```python3
+```python
 import experiments
 df = experiments.verb_forgetting_grid()
 experiments.verb_forgetting_plot(df)
