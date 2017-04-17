@@ -1,0 +1,9 @@
+networkx
+numpy
+sympy
+pandas
+seaborn
+matplotlib
+nose
+-e git://github.com/Futrell/rfutils.git#egg=rfutils
+-e git://github.com/Futrell/cliqs.git#egg=cliqs
