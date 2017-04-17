@@ -1,7 +1,7 @@
 # incnoise
 Incremental noisy channel sentence processing model
 
-This repository contains code for replicating [Futrell & Levy (2017, EACL)](http://aclweb.org/anthology/E/E17/E17-1065.pdf).
+This repository contains Python 3 code for replicating [Futrell & Levy (2017, EACL)](http://aclweb.org/anthology/E/E17/E17-1065.pdf).
 
 ```
 @inproceedings{futrell2017noisy,
@@ -12,6 +12,8 @@ booktitle={Proceedings of the 15th Conference of the European Chapter of the Ass
 pages={688-698},
 address={Valencia, Spain}}
 ```
+
+To get started: `pip3 install -r requirements.txt`.
 
 ## Figure 1
 The relevant code is in the directory `code`. To generate the numbers for Figure 1, do:
@@ -30,4 +32,3 @@ df = experiments.verb_forgetting_grid()
 experiments.verb_forgetting_plot(df)
 ```
 This will bring up a matplotlib plot of Figure 2.
-
