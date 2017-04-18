@@ -54,7 +54,7 @@ Then use the vocab file to calculate MI with a frequency cutoff:
 $ cat arcs_01-01 | python3 compute_mi.py vocab 10000
 ```
 
-Two compare the MI of two sets of counts using a permutation test, do (for example):
+To compare the MI of two sets of counts using a permutation test, do (for example):
 ```
 $ python3 compare_mi.py arcs_012-01 arcs_012-02 vocab 10000 500
 ```
@@ -62,9 +62,18 @@ This does a permutation test with 500 samples comparing MI in the files `arcs_01
 
 ## Figure 3
 
-Figure 3 shows the mutual information over part of speech tags for different dependency relations in several UD corpora.
+Figure 3 shows the mutual information over part of speech tags for different dependency relations in several UD corpora. To replicate these numbers, do in Python:
+```python
+import hdmi
+hdmi.hdmi_topologies_with_permutation_tests()
+```
 
 ## Figure 4
 
 Figure 4 shows average pmi values of pos tags at different distances in the UD 1.4 corpora.
+To replicate these numbers, do in Python:
+```python
+import hdmi
+hdmi.skip_pmi_sweep()
+```
 
