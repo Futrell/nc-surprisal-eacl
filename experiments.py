@@ -12,6 +12,7 @@ import sympy
 from pmonad import *
 import incnoise
 import infotrees
+import pcfg
 
 EPSILON = 10 ** -4
 
@@ -19,6 +20,20 @@ def is_close(x, y, tol):
     return abs(x - y) < tol
 
 def embedding_lang(p_mod, p_rc, p_src, num_levels):
+    rules = [
+        (pcfg.Rule('S', ('NP', 'V')), 1),
+        (pcfg.Rule('NP', ('N',)), 1 - p_mod),
+        (pcfg.Rule('NP', ('N', 'RC')), p_mod * p_rc),
+        (pcfg.Rule('NP', ('N', 'PP')), p_mod * (1 - p_rc)),
+        (pcfg.Rule('PP', ('P', 'NP')), 1),
+        (pcfg.Rule('RC', ('C', 'NP', 'V')), 1 - p_src),
+        (pcfg.Rule('RC', ('C', 'V', 'NP')), p_src)
+    ]
+    grammar = pcfg.make_bounded_pcfg(SymbolicEnumeration, rules, num_levels)
+    return grammar.distribution()
+
+def _embedding_lang(p_mod, p_rc, p_src, num_levels):
+    # Old and broken!
     N, V, C, P = "NVCP"
 
     enum = SymbolicEnumeration
@@ -43,7 +58,7 @@ def embedding_lang(p_mod, p_rc, p_src, num_levels):
     def mod_rule(s):
         return enum.flip(p_mod).bind( # if flip(p_mod), then ...
             lambda mod: enum.ret(s) if not mod else enum.flip(p_rc).bind(
-                lambda rc: rc_dist(s) if rc else enum.ret(add_distractor(s))
+            lambda rc: rc_dist(s) if rc else enum.ret(add_distractor(s))
             )
         )
 
@@ -51,6 +66,7 @@ def embedding_lang(p_mod, p_rc, p_src, num_levels):
     for _ in range(num_levels):
         s = s.bind(mod_rule)
     return s
+
 
 def verb_forgetting_grid(eps=.01):
     ms = [.25, .5, .75]
@@ -117,42 +133,29 @@ def verb_forgetting_conditions(num_levels=2,
     # this might be slow.
     npt = incnoise.noisy_prefix_tree(lang, deletion_noise)
 
-    prefix2 = (
+    prefixes = [
         tuple("N")
-        + tuple("CN") * num_levels
-        + tuple("V") * num_levels
-    )
+        + tuple("CN") * (num_levels - k)
+        + tuple("V") * (num_levels - k)
+        for k in reversed(range(num_levels))
+    ]
 
-    prefix1 = (
-        tuple("N")
-        + tuple("CN") * (num_levels - 1)
-        + tuple("V") * (num_levels - 1)
-    )
+    def gen():
+        for i in range(num_levels):
+            noisy_prefix_distro = deletion_noise(prefixes[i]).marginalize()
 
-    noisy_prefix2_distro = deletion_noise(prefix2).marginalize()
-    noisy_prefix1_distro = deletion_noise(prefix1).marginalize()
+            cost_correct = 0
+            cost_incorrect = 0
+            for noisy_prefix, p in noisy_prefix_distro.dict.items():
+                p_correct = npt[noisy_prefix].dict.get('V', 0)
+                p_incorrect = npt[noisy_prefix].dict.get(incnoise.HALT, 0)
+                cost_correct -= p * sympy.log(p_correct)
+                cost_incorrect -= p * sympy.log(p_incorrect)
+            cost_correct = cost_correct.simplify()
+            cost_incorrect = cost_incorrect.simplify()
+            yield cost_correct, cost_incorrect
 
-    cost_correct2 = 0
-    cost_incorrect2 = 0
-    for noisy_prefix, p in noisy_prefix2_distro.dict.items():
-        p_correct = npt[noisy_prefix].dict.get('V', 0)
-        p_incorrect = npt[noisy_prefix].dict.get(incnoise.HALT, 0)
-        cost_correct2 -= p * sympy.log(p_correct)
-        cost_incorrect2 -= p * sympy.log(p_incorrect)
-    cost_correct2 = cost_correct2.simplify()
-    cost_incorrect2 = cost_incorrect2.simplify()
-
-    cost_correct1 = 0
-    cost_incorrect1 = 0
-    for noisy_prefix, p in noisy_prefix1_distro.dict.items():
-        p_correct = npt[noisy_prefix].dict.get('V', 0)
-        p_incorrect = npt[noisy_prefix].dict.get(incnoise.HALT, 0)
-        cost_correct1 -= p * sympy.log(p_correct)
-        cost_incorrect1 -= p * sympy.log(p_incorrect)
-    cost_correct1 = cost_correct1.simplify()
-    cost_incorrect1 = cost_incorrect1.simplify()    
-
-    return (cost_correct1, cost_incorrect1), (cost_correct2, cost_incorrect2)
+    return tuple(gen())
 
 def tree_cost(t, ks, noise=None, p=.1, num_samples=10000, sparsity=1):
     lang = enumeration_from_sampling_function(
