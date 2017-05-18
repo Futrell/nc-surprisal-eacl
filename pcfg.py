@@ -10,17 +10,18 @@ import pyrsistent as pyr
 from pmonad import *
 
 Rule = namedtuple('Rule', ['lhs', 'rhs'])
-concatenate = operator.add
+def concatenate(sequences):
+    return sum(sequences, ())
 
-def make_pcfg(monad, rules, start='S', combine=concatenate):
-    rewrites = process_rules(monad, rules)
-    return PCFG(monad, rewrites, start, monad.lift_ret(combine))
+def make_pcfg(monad, rules, start='S'):
+    rewrites = process_pcfg_rules(monad, rules)
+    return PCFG(monad, rewrites, start)
 
-def make_bounded_pcfg(monad, rules, bound, start='S', combine=concatenate):
-    rewrites = process_rules(monad, rules)
-    return BoundedPCFG(monad, rewrites, start, monad.lift_ret(combine), bound)
+def make_bounded_pcfg(monad, rules, bound, start='S'):
+    rewrites = process_pcfg_rules(monad, rules)
+    return BoundedPCFG(monad, rewrites, start, bound)
 
-def process_rules(monad, rules):
+def process_pcfg_rules(monad, rules):
     d = {}
     for rule, prob in rules:
         if rule.lhs in d:
@@ -31,13 +32,29 @@ def process_rules(monad, rules):
         d[k] = monad(v).normalize()
     return d
 
+def process_pcfrs_rules(monad, rules):
+    d = {}
+    for rule, prob in rules:
+        new_lhs = (rule.lhs, len(rule.rhs))
+        if rule.lhs in d:
+            d[new_lhs].append((rule.rhs, prob))
+        else:
+            d[new_lhs] = [(rule.rhs, prob)]
+    for k, v in d.items():
+        d[k] = monad(v).normalize()
+    return d
+
+def make_pcfrs(monad, rules, start='S'):
+    rewrites = process_pcfrs_rules(monad, rules)
+    return PCFRS(monad, rewrites, start)
+
 # PCFG : m x (a -> m [a]) x a x ([a] x [a] -> m [a])
 class PCFG(object):
-    def __init__(self, monad, rewrites, start, combine):
+    def __init__(self, monad, rewrites, start):
         self.monad = monad
         self.rewrites = rewrites
         self.start = start
-        self.combine = combine
+        self.combine = self.monad.lift_ret(concatenate)
 
     # rewrite_nonterminal : a -> Enum [a]
     def rewrite_nonterminal(self, symbol):
@@ -56,38 +73,78 @@ class PCFG(object):
 
     # expand_string : [a] -> Enum [a]
     def expand_string(self, string):
-        return self.monad.mapM(self.rewrite_symbol, string) >> (lambda symbols:
-            self.monad.reduceM(self.combine, symbols)
-        )
+        """ Expand a string of symbols into distributions over rewrites,
+        then combine the rewrites into all the possible resulting strings using
+        the (possibly probabilitic) combination function. """
+        return self.monad.mapM(self.rewrite_symbol, string) >> self.combine
 
     def distribution(self):
         return self.rewrite_symbol(self.start)
 
 class BoundedPCFG(PCFG):
-    def __init__(self, monad, rewrites, start, combine, bound):
+    """ PCFRS where a symbol can only be rewritten n times recursively. """
+    def __init__(self, monad, rewrites, start, bound):
         self.monad = monad
         self.rewrites = rewrites
         self.start = start
-        self.combine = combine
+        self.combine = self.monad.lift_ret(concatenate)
         self.bound = bound
 
     def rewrite_symbol(self, symbol, history):
         if self.is_nonterminal(symbol):
-            result = self.rewrite_nonterminal(symbol)
-            new_history = history.add(symbol)
-            bound_ok = new_history.count(symbol) <= self.bound + 1
-            return self.monad.guard(bound_ok) >> (
+            return self.monad.guard(history.count(symbol) <= self.bound) >> (
                 lambda _: self.rewrite_nonterminal(symbol) >> (
-                lambda s: self.expand_string(s, new_history)))
+                lambda s: self.expand_string(s, history.add(symbol))))
         else:
             return self.monad.ret((symbol,))
 
     def expand_string(self, string, history):
-        result = self.monad.mapM(lambda s: self.rewrite_symbol(s, history), string)
-        return result.bind(lambda s: self.monad.reduceM(self.combine, s, initial=()))
+        rewrite = lambda s: self.rewrite_symbol(s, history)
+        return self.monad.mapM(rewrite, string) >> self.combine
 
     def distribution(self):
         return self.rewrite_symbol(self.start, pyr.pbag([]))
+
+def process_indexed_string(string):
+    symbols = []
+    part_of = []
+    seen = {}
+    for i, part in enumerate(string):
+        if isinstance(part, str):
+            symbols.append((part, 1))
+            part_of.append(i)
+        else:
+            symbol, index, num_blocks = part
+            symbols.append(symbol)
+            if (symbol, index) in seen:
+                part_of.append(seen[symbol, index])
+            else:
+                part_of.append(i)
+                seen[symbol, index] = i
+    return symbol, part_of
+            
+def put_into_indices(self, symbols, indices):
+    seen = Counter()
+    def gen():
+        for index in indices:
+            yield symbols[index][seen[index]]
+            seen[index] += 1
+    return tuple(gen())
+
+class PCFRS(PCFG):
+    # rules have format (symbol, num_blocks) -> (blocks)
+    def __init__(self, monad, rewrites, start):
+        self.monad = monad
+        self.rewrites = rewrites
+        self.start = start
+
+    def expand_string(self, string):
+        symbols, indices = process_indexed_string(string)
+        return self.monad.mapM(self.rewrite_symbol, symbols) >> (
+            lambda s: self.monad.ret(concatenate(put_into_indices(s, indices))))
+
+    def distribution(self):
+        return self.rewrite_nonterminal((self.start, 1))
 
 def test_pcfg():
     from math import log, exp
@@ -126,13 +183,13 @@ def test_bounded_pcfg():
     assert enum.dict[('a', 'a', 'b', 'b')] == log(1/8)
     assert enum.dict[('a', 'a', 'a', 'b', 'b', 'b')] == log(1/8)
     
-def _dont_test_pmcfg():
+def test_pcfrs():
     from math import log
     r1 = Rule('S', (('NP', 'VP'),))
     r2 = Rule('NP', (('D', 'N'),))
     r3 = Rule('NPR', (('D', 'N'), ('RP',)))
     r4 = Rule('VP', (('V',),))
-    r5 = Rule('S', (('NPR', 'VP', 'NPR0'),))
+    r5 = Rule('S', ((('NPR', 0, 0), 'VP', ('NPR', 0, 1)),))
     r6 = Rule('D', (('the',),))
     r7 = Rule('D', (('a',),))
     r8 = Rule('N', (('cat',),))
@@ -157,6 +214,9 @@ def _dont_test_pmcfg():
         (r12, log(1/3)),
         (r13, log(2/3))
     ]
+
+    pcfrs = make_pcfrs(Enumeration, rules)
+    return pcfrs
 
 
 if __name__ == '__main__':
